@@ -1,41 +1,31 @@
-import React, { useState, useMemo, useCallback } from "react";
+// src/pages/debit-accounts/DebitAccountsManagement.jsx
+import React, { useState, useMemo, useCallback, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import axios from "../../../axios/axios";
 import {
   ArrowLeft,
   Search,
   RefreshCw,
   Eye,
-  X,
-  Calendar,
-  DollarSign,
   Users,
+  DollarSign,
   TrendingUp,
   AlertCircle,
   ChevronLeft,
   ChevronRight,
-  Receipt,
-  CheckCircle,
-  XCircle,
-  Sparkles,
 } from "lucide-react";
 import Select from "react-select";
 
-// Reusable Components from your existing code
+// Reusable Components (same as before)
 const Toast = ({ show, message, type }) =>
   show && (
     <div
       className={`fixed top-4 right-4 p-4 rounded-xl shadow-2xl text-white z-50 animate-slide-in ${
-        type === "success"
-          ? "bg-gradient-to-r from-emerald-500 to-emerald-600"
-          : "bg-gradient-to-r from-red-500 to-red-600"
+        type === "success" ? "bg-emerald-600" : "bg-red-600"
       }`}
     >
       <div className="flex items-center space-x-3">
-        {type === "success" ? (
-          <CheckCircle size={20} className="animate-bounce" />
-        ) : (
-          <XCircle size={20} className="animate-pulse" />
-        )}
-        <span className="font-medium">{message}</span>
+        {type === "success" ? "Success" : "Error"} {message}
       </div>
     </div>
   );
@@ -81,21 +71,15 @@ const Pagination = ({
 }) => {
   const pageNumbers = useMemo(() => {
     const pages = [];
-    const maxPagesToShow = 5;
-    let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
-    let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
-
-    if (endPage - startPage + 1 < maxPagesToShow) {
-      startPage = Math.max(1, endPage - maxPagesToShow + 1);
-    }
-
-    for (let i = startPage; i <= endPage; i++) {
-      pages.push(i);
-    }
+    const max = 5;
+    let start = Math.max(1, currentPage - Math.floor(max / 2));
+    let end = Math.min(totalPages, start + max - 1);
+    if (end - start + 1 < max) start = Math.max(1, end - max + 1);
+    for (let i = start; i <= end; i++) pages.push(i);
     return pages;
   }, [currentPage, totalPages]);
 
-  const itemsPerPageOptions = [
+  const options = [
     { value: 10, label: "10 per page" },
     { value: 25, label: "25 per page" },
     { value: 50, label: "50 per page" },
@@ -106,11 +90,9 @@ const Pagination = ({
       <div className="flex items-center space-x-2 mb-4 sm:mb-0">
         <span className="text-sm text-gray-600">Items per page:</span>
         <Select
-          value={itemsPerPageOptions.find(
-            (option) => option.value === itemsPerPage
-          )}
-          onChange={(option) => onItemsPerPageChange(option.value)}
-          options={itemsPerPageOptions}
+          value={options.find((o) => o.value === itemsPerPage)}
+          onChange={(opt) => onItemsPerPageChange(opt.value)}
+          options={options}
           className="w-32"
           classNamePrefix="react-select"
         />
@@ -119,27 +101,27 @@ const Pagination = ({
         <button
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage === 1}
-          className="p-2 rounded-lg bg-white border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+          className="p-2 rounded-lg bg-white border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
         >
           <ChevronLeft size={16} />
         </button>
-        {pageNumbers.map((page) => (
+        {pageNumbers.map((p) => (
           <button
-            key={page}
-            onClick={() => onPageChange(page)}
-            className={`px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium transition-all duration-200 ${
-              currentPage === page
+            key={p}
+            onClick={() => onPageChange(p)}
+            className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all ${
+              currentPage === p
                 ? "bg-purple-600 text-white border-purple-600"
-                : "bg-white text-gray-600 hover:bg-gray-100"
+                : "bg-white text-gray-600 border-gray-300 hover:bg-gray-100"
             }`}
           >
-            {page}
+            {p}
           </button>
         ))}
         <button
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage === totalPages}
-          className="p-2 rounded-lg bg-white border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+          className="p-2 rounded-lg bg-white border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
         >
           <ChevronRight size={16} />
         </button>
@@ -147,98 +129,37 @@ const Pagination = ({
     </div>
   );
 };
-
 const DebitAccountsManagement = () => {
-  const [vendors] = useState([
-    {
-      id: "1",
-      vendorId: "VEND2025001",
-      name: "ABC Bullion Trading LLC",
-      totalInvoices: 12,
-      totalPayable: 18450.75,
-      totalPaid: 15275.28,
-      balance: 3175.47,
-    },
-    {
-      id: "2",
-      vendorId: "VEND2025002",
-      name: "Global Suppliers Ltd",
-      totalInvoices: 8,
-      totalPayable: 9875.0,
-      totalPaid: 9875.0,
-      balance: 0.0,
-    },
-    {
-      id: "3",
-      vendorId: "VEND2025003",
-      name: "Premier Electronics",
-      totalInvoices: 15,
-      totalPayable: 45678.9,
-      totalPaid: 32100.0,
-      balance: 13578.9,
-    },
-  ]);
+  const navigate = useNavigate();
 
-  const dummyTransactions = [
-    {
-      type: "Purchase Invoice",
-      date: "17/10/2025",
-      invNo: "PURV-20251017-059",
-      paid: 7350.0,
-      balance: 7350.0,
-      ref: "-",
-      status: "Unpaid",
-    },
-    {
-      type: "Purchase Invoice",
-      date: "17/10/2025",
-      invNo: "PURV-20251017-510",
-      paid: 4000.0,
-      balance: 4000.0,
-      ref: "-",
-      status: "Unpaid",
-    },
-    {
-      type: "Purchase Return",
-      date: "15/10/2025",
-      invNo: "PRTN-20251015-214",
-      paid: 619.97,
-      balance: 0,
-      ref: "PYMT-001",
-      status: "Paid",
-    },
-    {
-      type: "Purchase Invoice",
-      date: "10/10/2025",
-      invNo: "PURV-20251010-971",
-      paid: 5000.0,
-      balance: 0,
-      ref: "PYMT-003",
-      status: "Paid",
-    },
-    {
-      type: "Purchase Return",
-      date: "08/10/2025",
-      invNo: "PRTN-20251008-105",
-      paid: 1200.0,
-      balance: 0,
-      ref: "PYMT-002",
-      status: "Paid",
-    },
-  ];
-
+  const [vendors, setVendors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [selectedVendor, setSelectedVendor] = useState(null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [transactions, setTransactions] = useState([]);
+
+  // Fetch vendors from backend
+  useEffect(() => {
+    const fetchVendors = async () => {
+      try {
+        setLoading(true);
+        const res = await axios.get("/ledger/debit-accounts");
+        setVendors(res.data.data);
+      } catch (err) {
+        setError(err.response?.data?.message || "Failed to load vendors");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchVendors();
+  }, []);
 
   const filteredVendors = useMemo(() => {
     return vendors.filter(
       (v) =>
         v.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        v.vendorId.toLowerCase().includes(searchTerm.toLowerCase())
+        v.partyId.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [vendors, searchTerm]);
 
@@ -248,50 +169,37 @@ const DebitAccountsManagement = () => {
   );
   const totalPages = Math.ceil(filteredVendors.length / itemsPerPage);
 
-  const stats = {
-    totalVendors: vendors.length,
-    totalPayable: vendors.reduce((s, v) => s + v.totalPayable, 0),
-    totalPaid: vendors.reduce((s, v) => s + v.totalPaid, 0),
-    totalBalance: vendors.reduce((s, v) => s + v.balance, 0),
-  };
+  const stats = useMemo(() => {
+    return {
+      totalVendors: vendors.length,
+      totalPayable: vendors.reduce((s, v) => s + v.totalPayable, 0),
+      totalPaid: vendors.reduce((s, v) => s + v.totalPaid, 0),
+      totalBalance: vendors.reduce((s, v) => s + v.balance, 0),
+    };
+  }, [vendors]);
 
-  const openVendorModal = (vendor) => {
-    setSelectedVendor(vendor);
-    setTransactions(dummyTransactions);
-    setModalOpen(true);
-  };
-
-  const formatCurrency = (amount, isNegative = false) => (
-    <span
-      className={`font-bold ${
-        isNegative ? "text-red-600" : "text-emerald-600"
-      }`}
-    >
-      {isNegative ? "-" : "+"}AED {Math.abs(amount).toFixed(2).toLocaleString()}
-    </span>
-  );
+  if (loading)
+    return <div className="text-center py-20 text-2xl">Loading vendors...</div>;
+  if (error)
+    return (
+      <div className="text-center py-20 text-red-600 text-xl">{error}</div>
+    );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100 p-4 sm:p-6">
-      <style>{`
-        @keyframes slide-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
-        .animate-slide-in { animation: slide-in 0.3s ease-out; }
-        .animate-shake { animation: shake 0.3s ease-in-out; }
-        .modal-backdrop { backdrop-filter: blur(8px); animation: fadeIn 0.2s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-      `}</style>
-
-      <Toast show={false} />
+      <Toast show={!!error} message={error} type="error" />
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8">
         <div className="flex items-center space-x-4">
-          <button className="p-3 rounded-xl bg-white shadow-md hover:shadow-lg transition-all duration-300 hover:scale-105">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-3 rounded-xl bg-white shadow-md hover:shadow-lg"
+          >
             <ArrowLeft size={20} className="text-gray-600" />
           </button>
           <div>
-            <h1 className="text-3xl font-bold text-black bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+            <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-blue-600">
               Debit Accounts
             </h1>
             <p className="text-gray-600 mt-1 font-medium">
@@ -299,18 +207,13 @@ const DebitAccountsManagement = () => {
             </p>
           </div>
         </div>
-        <div className="flex items-center space-x-3 mt-4 sm:mt-0">
-          <button className="p-3 rounded-xl bg-white shadow-md hover:shadow-lg transition-all hover:scale-105">
-            <RefreshCw size={18} className="text-gray-600" />
-          </button>
-        </div>
       </div>
 
-      {/* Stat Cards - EXACT SAME STYLE */}
+      {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard
           title="Total Vendors"
-          count={stats.totalVendors}
+          count={stats.totalV}
           icon={<Users size={24} />}
           bgColor="bg-emerald-50"
           textColor="text-emerald-700"
@@ -344,7 +247,7 @@ const DebitAccountsManagement = () => {
         <StatCard
           title="Outstanding"
           count={`AED ${stats.totalBalance.toFixed(2).toLocaleString()}`}
-          icon={<DollarSign size={24} />}
+          icon={<AlertCircle size={24} />}
           bgColor="bg-red-50"
           textColor="text-red-700"
           borderColor="border-red-200"
@@ -366,12 +269,12 @@ const DebitAccountsManagement = () => {
             placeholder="Search by vendor name or ID..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-300 transition-all hover:border-gray-300"
+            className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500"
           />
         </div>
       </div>
 
-      {/* Vendor Table */}
+      {/* Table */}
       <div className="bg-white rounded-2xl shadow-xl border border-gray-100">
         <div className="p-6 border-b border-gray-100">
           <h2 className="text-xl font-bold text-gray-900">
@@ -407,12 +310,12 @@ const DebitAccountsManagement = () => {
             <tbody className="bg-white divide-y divide-gray-200">
               {paginated.map((v) => (
                 <tr
-                  key={v.id}
-                  onClick={() => openVendorModal(v)}
-                  className="hover:bg-gradient-to-r hover:from-purple-50 hover:to-blue-50 transition-all duration-200 cursor-pointer"
+                  key={v._id}
+                  onClick={() => navigate(`/debit-accounts/vendor/${v._id}`)}
+                  className="hover:bg-gradient-to-r hover:from-purple-50 hover:to-blue-50 cursor-pointer transition-all"
                 >
                   <td className="px-6 py-4 font-mono text-sm text-purple-700 font-bold">
-                    {v.vendorId}
+                    {v.partyId}
                   </td>
                   <td className="px-6 py-4 font-semibold text-gray-900">
                     {v.name}
@@ -428,7 +331,13 @@ const DebitAccountsManagement = () => {
                     AED {v.balance.toFixed(2)}
                   </td>
                   <td className="px-6 py-4">
-                    <button className="text-purple-600 hover:text-purple-800 font-semibold flex items-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/debit-accounts/vendor/${v._id}`);
+                      }}
+                      className="text-purple-600 hover:text-purple-800 font-semibold flex items-center gap-1"
+                    >
                       <Eye size={16} /> View
                     </button>
                   </td>
@@ -446,139 +355,6 @@ const DebitAccountsManagement = () => {
           onItemsPerPageChange={setItemsPerPage}
         />
       </div>
-
-      {/* Vendor Details Modal */}
-      {modalOpen && selectedVendor && (
-        <div className="fixed inset-0 bg-black/30 modal-backdrop flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
-            <div className="bg-gradient-to-r from-purple-600 to-blue-600 p-6 text-white">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="text-2xl font-bold flex items-center gap-3">
-                    <Users size={28} /> {selectedVendor.name}
-                  </h3>
-                  <p className="text-purple-100 mt-1">
-                    Vendor ID: {selectedVendor.vendorId}
-                  </p>
-                  <p className="text-xl font-bold mt-3">
-                    Outstanding:{" "}
-                    <span className="text-red-200">
-                      AED {selectedVendor.balance.toFixed(2)}
-                    </span>
-                  </p>
-                </div>
-                <button
-                  onClick={() => setModalOpen(false)}
-                  className="p-2 hover:bg-white/20 rounded-xl transition hover:rotate-90"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-            </div>
-
-            {/* Filters */}
-            <div className="p-8 bg-gradient-to-b from-gray-50 to-white border-b border-gray-200">
-              <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                Filters
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-                <div>
-                  <input
-                    type="date"
-                    className="w-full px-5 py-4 bg-white/70 backdrop-blur-sm border border-gray-300 rounded-2xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition-all outline-none text-gray-700 font-medium"
-                  />
-                </div>
-                <div>
-                  <input
-                    type="date"
-                    className="w-full px-5 py-4 bg-white/70 backdrop-blur-sm border border-gray-300 rounded-2xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition-all outline-none text-gray-700 font-medium"
-                  />
-                </div>
-                <div>
-                  <select className="w-full px-5 py-4 bg-white/70 backdrop-blur-sm border border-gray-300 rounded-2xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition-all outline-none text-gray-700 font-medium">
-                    <option>All Status</option>
-                    <option>Paid</option>
-                    <option>Unpaid</option>
-                    <option>Partially Paid</option>
-                  </select>
-                </div>
-                <div>
-                  <select className="w-full px-5 py-4 bg-white/70 backdrop-blur-sm border border-gray-300 rounded-2xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition-all outline-none text-gray-700 font-medium">
-                    <option>All Types</option>
-                    <option>Purchase Invoice</option>
-                    <option>Purchase Return</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Transaction Table */}
-            <div className="overflow-y-auto max-h-96 p-6">
-              <table className="w-full">
-                <thead className="bg-gradient-to-r from-purple-50 to-blue-50">
-                  <tr>
-                    {[
-                      "Invoice Type",
-                      "Inv Date",
-                      "Inv No",
-                      "Paid Amnt",
-                      "Balance Amnt",
-                      "Ref No",
-                      "Status",
-                    ].map((h) => (
-                      <th
-                        key={h}
-                        className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {transactions.map((t, i) => (
-                    <tr key={i} className="hover:bg-purple-50">
-                      <td className="px-6 py-4">
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-bold ${
-                            t.type.includes("Return")
-                              ? "bg-red-100 text-red-700"
-                              : "bg-emerald-100 text-emerald-700"
-                          }`}
-                        >
-                          {t.type}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">{t.date}</td>
-                      <td className="px-6 py-4 font-mono font-bold">
-                        {t.invNo}
-                      </td>
-                      <td className="px-6 py-4">
-                        {formatCurrency(t.paid, t.type.includes("Return"))}
-                      </td>
-                      <td className="px-6 py-4 text-red-600 font-bold">
-                        AED {t.balance.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 text-gray-600">{t.ref}</td>
-                      <td className="px-6 py-4">
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-bold text-white ${
-                            t.status === "Paid"
-                              ? "bg-emerald-500"
-                              : "bg-red-500"
-                          }`}
-                        >
-                          {t.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -1,39 +1,31 @@
-import React, { useState, useMemo } from "react";
+// src/pages/debit-accounts/DebitAccountsManagement.jsx
+import React, { useState, useMemo, useCallback, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import axios from "../../../axios/axios";
 import {
   ArrowLeft,
   Search,
   RefreshCw,
   Eye,
-  X,
   Users,
-  TrendingUp,
   DollarSign,
+  TrendingUp,
   AlertCircle,
   ChevronLeft,
   ChevronRight,
-  Receipt,
-  CheckCircle,
-  XCircle,
 } from "lucide-react";
 import Select from "react-select";
 
-// Re-use the same reusable components you already have
+// Reusable Components (same as before)
 const Toast = ({ show, message, type }) =>
   show && (
     <div
       className={`fixed top-4 right-4 p-4 rounded-xl shadow-2xl text-white z-50 animate-slide-in ${
-        type === "success"
-          ? "bg-gradient-to-r from-emerald-500 to-emerald-600"
-          : "bg-gradient-to-r from-red-500 to-red-600"
+        type === "success" ? "bg-emerald-600" : "bg-red-600"
       }`}
     >
       <div className="flex items-center space-x-3">
-        {type === "success" ? (
-          <CheckCircle size={20} className="animate-bounce" />
-        ) : (
-          <XCircle size={20} className="animate-pulse" />
-        )}
-        <span className="font-medium">{message}</span>
+        {type === "success" ? "Success" : "Error"} {message}
       </div>
     </div>
   );
@@ -137,200 +129,135 @@ const Pagination = ({
     </div>
   );
 };
-
 const CreditAccountsManagement = () => {
-  // Dummy customers data
-  const [customers] = useState([
-    {
-      id: "1",
-      customerId: "CUST2025001",
-      name: "Diamond Jewellers LLC",
-      totalInvoices: 18,
-      totalReceivable: 28450.0,
-      totalReceived: 19800.5,
-      balance: 8649.5,
-    },
-    {
-      id: "2",
-      customerId: "CUST2025002",
-      name: "Elite Retail Chain",
-      totalInvoices: 9,
-      totalReceivable: 15678.0,
-      totalReceived: 15678.0,
-      balance: 0.0,
-    },
-    {
-      id: "3",
-      customerId: "CUST2025003",
-      name: "Luxury Watches Dubai",
-      totalInvoices: 22,
-      totalReceivable: 67890.75,
-      totalReceived: 42000.0,
-      balance: 25890.75,
-    },
-  ]);
+  const navigate = useNavigate();
 
-  // Dummy transactions for modal
-  const dummyTransactions = [
-    {
-      type: "Sales Invoice",
-      date: "28/11/2025",
-      invNo: "SINV-20251128-001",
-      paid: 8500.0,
-      balance: 8500.0,
-      ref: "-",
-      status: "Unpaid",
-    },
-    {
-      type: "Sales Invoice",
-      date: "25/11/2025",
-      invNo: "SINV-20251125-115",
-      paid: 4200.0,
-      balance: 0,
-      ref: "RCVD-001",
-      status: "Paid",
-    },
-    {
-      type: "Sales Return",
-      date: "22/11/2025",
-      invNo: "SRTN-20251122-003",
-      paid: 1250.0,
-      balance: 0,
-      ref: "RCVD-002",
-      status: "Paid",
-    },
-    {
-      type: "Sales Invoice",
-      date: "18/11/2025",
-      invNo: "SINV-20251118-087",
-      paid: 9800.0,
-      balance: 3149.5,
-      ref: "-",
-      status: "Partially Paid",
-    },
-  ];
-
+  const [Customers, setCustomer] = useState([]);
+  console.log(Customers)
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [transactions, setTransactions] = useState([]);
 
-  const filteredCustomers = useMemo(() => {
-    return customers.filter(
-      (c) =>
-        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.customerId.toLowerCase().includes(searchTerm.toLowerCase())
+  // Fetch Customers from backend
+  useEffect(() => {
+    const fetchCustomer = async () => {
+      try {
+        setLoading(true);
+        const res = await axios.get("/ledger/credit-accounts");
+        setCustomer(res.data?.data);
+      } catch (err) {
+        setError(err.response?.data?.message || "Failed to load Customers");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchCustomer();
+  }, []);
+
+  const filteredCustomer = useMemo(() => {
+    return Customers?.filter(
+      (v) =>
+        v.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        v.partyId.toLowerCase().includes(searchTerm.toLowerCase())
     );
-  }, [customers, searchTerm]);
+  }, [Customers, searchTerm]);
 
-  const paginated = filteredCustomers.slice(
+  const paginated = filteredCustomer.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
-  const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
+  const totalPages = Math.ceil(filteredCustomer.length / itemsPerPage);
 
-  const stats = {
-    totalCustomers: customers.length,
-    totalReceivable: customers.reduce((s, c) => s + c.totalReceivable, 0),
-    totalReceived: customers.reduce((s, c) => s + c.totalReceived, 0),
-    totalBalance: customers.reduce((s, c) => s + c.balance, 0),
-  };
+  const stats = useMemo(() => {
+    return {
+      totalCustomer: Customers?.length,
+      totalReceivable: Customers.reduce((s, v) => s + v.totalReceivable, 0),
+      totalPaid: Customers.reduce((s, v) => s + v.totalPaid, 0),
+      totalBalance: Customers.reduce((s, v) => s + v.balance, 0),
+    };
+  }, [Customers]);
+  
 
-  const openCustomerModal = (customer) => {
-    setSelectedCustomer(customer);
-    setTransactions(dummyTransactions);
-    setModalOpen(true);
-  };
-
-  // +ve for Sales Invoice (green), -ve for Sales Return (red)
-  const formatCurrency = (amount, isReturn = false) => (
-    <span
-      className={`font-bold ${isReturn ? "text-red-600" : "text-emerald-600"}`}
-    >
-      {isReturn ? "-" : "+"}AED {Math.abs(amount).toFixed(2).toLocaleString()}
-    </span>
-  );
+  if (loading)
+    return (
+      <div className="text-center py-20 text-2xl">Loading Customers...</div>
+    );
+  if (error)
+    return (
+      <div className="text-center py-20 text-red-600 text-xl">{error}</div>
+    );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100 p-4 sm:p-6">
-      <style>{`
-        @keyframes slide-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        .animate-slide-in { animation: slide-in 0.3s ease-out; }
-        .modal-backdrop { backdrop-filter: blur(8px); animation: fadeIn 0.2s ease-out; }
-      `}</style>
-
-      <Toast show={false} />
+      <Toast show={!!error} message={error} type="error" />
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8">
         <div className="flex items-center space-x-4">
-          <button className="p-3 rounded-xl bg-white shadow-md hover:shadow-lg transition-all hover:scale-105">
+          <button
+            onClick={() => navigate(-1)}
+            className="p-3 rounded-xl bg-white shadow-md hover:shadow-lg"
+          >
             <ArrowLeft size={20} className="text-gray-600" />
           </button>
           <div>
-            <h1 className="text-3xl font-bold text-black bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+            <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-blue-600">
               Credit Accounts
             </h1>
             <p className="text-gray-600 mt-1 font-medium">
-              {customers.length} total customers
+              {Customers.length} total Customers
             </p>
           </div>
         </div>
-        <div className="flex items-center space-x-3 mt-4 sm:mt-0">
-          <button className="p-3 rounded-xl bg-white shadow-md hover:shadow-lg transition-all hover:scale-105">
-            <RefreshCw size={18} className="text-gray-600" />
-          </button>
-        </div>
       </div>
 
-      {/* Stat Cards */}
+      {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard
-          title="Total Customers"
-          count={stats.totalCustomers}
+          title="Total Customer"
+          count={stats.totalV}
           icon={<Users size={24} />}
           bgColor="bg-emerald-50"
           textColor="text-emerald-700"
           borderColor="border-emerald-200"
           iconBg="bg-emerald-100"
           iconColor="text-emerald-600"
-          subText="Active buyers"
+          subText="Active suppliers"
         />
         <StatCard
           title="Total Receivable"
-          count={`AED ${stats.totalReceivable.toFixed(2).toLocaleString()}`}
+          count={`AED ${stats.totalReceivable?.toFixed(2).toLocaleString()}`}
           icon={<TrendingUp size={24} />}
           bgColor="bg-purple-50"
           textColor="text-purple-700"
           borderColor="border-purple-200"
           iconBg="bg-purple-100"
           iconColor="text-purple-600"
-          subText="All sales invoices"
+          subText="All invoices"
         />
         <StatCard
-          title="Total Received"
-          count={`AED ${stats.totalReceived.toFixed(2).toLocaleString()}`}
+          title="Total Paid"
+          count={`AED ${stats?.totalPaid.toFixed(2).toLocaleString()}`}
           icon={<DollarSign size={24} />}
           bgColor="bg-blue-50"
           textColor="text-blue-700"
           borderColor="border-blue-200"
           iconBg="bg-blue-100"
           iconColor="text-blue-600"
-          subText="Collected amount"
+          subText="Cleared amount"
         />
         <StatCard
           title="Outstanding"
-          count={`AED ${stats.totalBalance.toFixed(2).toLocaleString()}`}
+          count={`AED ${stats?.totalBalance.toFixed(2).toLocaleString()}`}
           icon={<AlertCircle size={24} />}
           bgColor="bg-red-50"
           textColor="text-red-700"
           borderColor="border-red-200"
           iconBg="bg-red-100"
           iconColor="text-red-600"
-          subText="Due from customers"
+          subText="Due balance"
         />
       </div>
 
@@ -343,22 +270,22 @@ const CreditAccountsManagement = () => {
           />
           <input
             type="text"
-            placeholder="Search by customer name or ID..."
+            placeholder="Search by vendor name or ID..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-300 transition-all hover:border-gray-300"
+            className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500"
           />
         </div>
       </div>
 
-      {/* Customer Table */}
+      {/* Table */}
       <div className="bg-white rounded-2xl shadow-xl border border-gray-100">
         <div className="p-6 border-b border-gray-100">
           <h2 className="text-xl font-bold text-gray-900">
             Customer Credit Summary
           </h2>
           <p className="text-gray-600 text-sm mt-1">
-            Click any customer to view transaction history
+            Click any Customer to view transaction history
           </p>
         </div>
 
@@ -371,7 +298,7 @@ const CreditAccountsManagement = () => {
                   "Customer Name",
                   "No of Invoices",
                   "Total Receivable",
-                  "Total Received",
+                  "Total Paid",
                   "Balance",
                   "Actions",
                 ].map((h) => (
@@ -385,30 +312,36 @@ const CreditAccountsManagement = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {paginated.map((c) => (
+              {paginated.map((v) => (
                 <tr
-                  key={c.id}
-                  onClick={() => openCustomerModal(c)}
-                  className="hover:bg-gradient-to-r hover:from-purple-50 hover:to-blue-50 transition-all cursor-pointer"
+                  key={v._id}
+                  onClick={() => navigate(`/credit-accounts/customer/${v._id}`)}
+                  className="hover:bg-gradient-to-r hover:from-purple-50 hover:to-blue-50 cursor-pointer transition-all"
                 >
                   <td className="px-6 py-4 font-mono text-sm text-purple-700 font-bold">
-                    {c.customerId}
+                    {v.partyId}
                   </td>
                   <td className="px-6 py-4 font-semibold text-gray-900">
-                    {c.name}
+                    {v.name}
                   </td>
-                  <td className="px-6 py-4 text-center">{c.totalInvoices}</td>
+                  <td className="px-6 py-4 text-center">{v.totalInvoices}</td>
                   <td className="px-6 py-4">
-                    AED {c.totalReceivable.toFixed(2).toLocaleString()}
+                    AED {v.totalReceivable?.toFixed(2).toLocaleString()}
                   </td>
                   <td className="px-6 py-4 text-emerald-600">
-                    AED {c.totalReceived.toFixed(2).toLocaleString()}
+                    AED {v.totalPaid?.toFixed(2).toLocaleString()}
                   </td>
                   <td className="px-6 py-4 text-red-600 font-bold">
-                    AED {c.balance.toFixed(2).toLocaleString()}
+                    AED {v.balance?.toFixed(2)}
                   </td>
                   <td className="px-6 py-4">
-                    <button className="text-purple-600 hover:text-purple-800 font-semibold flex items-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/credit-accounts/customer/${v._id}`);
+                      }}
+                      className="text-purple-600 hover:text-purple-800 font-semibold flex items-center gap-1"
+                    >
                       <Eye size={16} /> View
                     </button>
                   </td>
@@ -426,132 +359,6 @@ const CreditAccountsManagement = () => {
           onItemsPerPageChange={setItemsPerPage}
         />
       </div>
-
-      {/* Customer Details Modal */}
-      {modalOpen && selectedCustomer && (
-        <div className="fixed inset-0 bg-black/30 modal-backdrop flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden">
-            <div className="bg-gradient-to-r from-purple-600 to-blue-600 p-6 text-white">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="text-2xl font-bold flex items-center gap-3">
-                    <Users size={28} /> {selectedCustomer.name}
-                  </h3>
-                  <p className="text-purple-100 mt-1">
-                    Customer ID: {selectedCustomer.customerId}
-                  </p>
-                  <p className="text-xl font-bold mt-3">
-                    Outstanding Receivable:{" "}
-                    <span className="text-red-200">
-                      AED {selectedCustomer.balance.toFixed(2).toLocaleString()}
-                    </span>
-                  </p>
-                </div>
-                <button
-                  onClick={() => setModalOpen(false)}
-                  className="p-2 hover:bg-white/20 rounded-xl transition hover:rotate-90"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-            </div>
-
-            {/* Filters */}
-            <div className="p-8 bg-gradient-to-b from-gray-50 to-white border-b border-gray-200">
-              <h3 className="text-xl font-bold text-gray-800 mb-4">Filters</h3>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-                <input
-                  type="date"
-                  className="w-full px-5 py-4 bg-white/70 backdrop-blur-sm border border-gray-300 rounded-2xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition-all outline-none text-gray-700 font-medium"
-                />
-                <input
-                  type="date"
-                  className="w-full px-5 py-4 bg-white/70 backdrop-blur-sm border border-gray-300 rounded-2xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition-all outline-none text-gray-700 font-medium"
-                />
-                <select className="w-full px-5 py-4 bg-white/70 backdrop-blur-sm border border-gray-300 rounded-2xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition-all outline-none text-gray-700 font-medium">
-                  <option>All Status</option>
-                  <option>Paid</option>
-                  <option>Unpaid</option>
-                  <option>Partially Paid</option>
-                </select>
-                <select className="w-full px-5 py-4 bg-white/70 backdrop-blur-sm border border-gray-300 rounded-2xl focus:ring-4 focus:ring-purple-300 focus:border-purple-500 transition-all outline-none text-gray-700 font-medium">
-                  <option>All Types</option>
-                  <option>Sales Invoice</option>
-                  <option>Sales Return</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Transactions Table */}
-            <div className="overflow-y-auto max-h-96 p-6">
-              <table className="w-full">
-                <thead className="bg-gradient-to-r from-purple-50 to-blue-50">
-                  <tr>
-                    {[
-                      "Invoice Type",
-                      "Inv Date",
-                      "Inv No",
-                      "Paid Amnt",
-                      "Balance Amnt",
-                      "Ref No",
-                      "Status",
-                    ].map((h) => (
-                      <th
-                        key={h}
-                        className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {transactions.map((t, i) => {
-                    const isReturn = t.type.includes("Return");
-                    return (
-                      <tr key={i} className="hover:bg-purple-50">
-                        <td className="px-6 py-4">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-bold ${
-                              isReturn
-                                ? "bg-red-100 text-red-700"
-                                : "bg-emerald-100 text-emerald-700"
-                            }`}
-                          >
-                            {t.type}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">{t.date}</td>
-                        <td className="px-6 py-4 font-mono font-bold">
-                          {t.invNo}
-                        </td>
-                        <td className="px-6 py-4">
-                          {formatCurrency(t.paid, isReturn)}
-                        </td>
-                        <td className="px-6 py-4 text-red-600 font-bold">
-                          AED {t.balance.toFixed(2).toLocaleString()}
-                        </td>
-                        <td className="px-6 py-4 text-gray-600">{t.ref}</td>
-                        <td className="px-6 py-4">
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-bold text-white ${
-                              t.status === "Paid" || isReturn
-                                ? "bg-emerald-500"
-                                : "bg-red-500"
-                            }`}
-                          >
-                            {t.status}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
