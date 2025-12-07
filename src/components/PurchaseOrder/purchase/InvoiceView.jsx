@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Download, Loader2, Printer, Send } from "lucide-react";
 import axiosInstance from "../../../axios/axios";
+import { createApproveBody } from '../../../utils/orderUtils';
 import { formatNumber, formatDateGB, decimalSum } from "../../../utils/format";
 
 const pad4 = (v = "") => {
@@ -16,6 +17,8 @@ const PurchaseInvoiceView = ({
   setActiveView,
   setSelectedPO,
   setCreatedPO,
+  addNotification,
+  updatePurchaseOrderStatus,   // NEW
 }) => {
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [profileData, setProfileData] = useState({
@@ -26,7 +29,7 @@ const PurchaseInvoiceView = ({
     phoneNumber: "04 885 7575",
     email: "corporate@elfab.ae",
     website: "www.nhfoodsglobal.com",
-    vatNumber: "1000033168300003",
+    vatNumber: "105033168300003",
     logo: null,
     bankName: "NATIONAL BANK OF RAS AL KHAIMAH",
     accountNumber: "0333547283001",
@@ -79,21 +82,24 @@ const PurchaseInvoiceView = ({
   if (!po) return null;
 
   const vendor = vendors.find((v) => v._id === po.vendorId) || {};
+  const vendorTRN = vendor.trnNO || vendor.vatNumber || po.vendorTRN || "";
   const isApproved = po.status === "APPROVED";
 
   // invoice meta: not editable in UI (display-only)
   const [invoiceMeta, setInvoiceMeta] = useState({
-    // Prefer explicit vendorReference, then refNo
-    reference: po.vendorReference ?? po.refNo ?? "",
-    poNo: isApproved ? (po.displayTransactionNo || po.transactionNo) : po.transactionNo,
+    // Prefer explicit vendorReference, then refNo, fallback '-'
+    reference: (po.vendorReference ?? po.refNo ?? '-') || '-',
+    // Always show only PO number without INV suffix
+    poNo: po.transactionNo || po.displayTransactionNo || '',
     paymentTerms: vendor.paymentTerms || "COD",
   });
 
   useEffect(() => {
     setInvoiceMeta((m) => ({
       ...m,
-      reference: (po.vendorReference ?? po.refNo ?? m.reference ?? ""),
-      poNo: isApproved ? (po.displayTransactionNo || po.transactionNo) : po.transactionNo,
+      reference: (po.vendorReference ?? po.refNo ?? m.reference ?? '-') || '-',
+      // Show PO number only; do not append invoice number into PO No field
+      poNo: po.transactionNo || po.displayTransactionNo || m.poNo || '',
       paymentTerms: vendor.paymentTerms || m.paymentTerms || "COD",
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,11 +125,10 @@ const PurchaseInvoiceView = ({
   const decimalWords = numberToWords(Math.round((grossAmount % 1) * 100));
   const amountInWords = `${numberToWords(Math.floor(grossAmount))} Dirhams and ${decimalWords} Fils Only`;
 
-  // pdf generation
-  const generatePDF = async (copyType) => {
+  // pdf generation (single copy only for PO)
+  const generatePDF = async () => {
     const html2canvas = (await import("html2canvas")).default;
     const { jsPDF } = await import("jspdf");
-    document.getElementById("copy-label").innerText = copyType;
     await new Promise((r) => setTimeout(r, 80));
     const el = document.getElementById("invoice-content");
     const canvas = await html2canvas(el, { scale: 3, useCORS: true, backgroundColor: "#fff" });
@@ -133,16 +138,47 @@ const PurchaseInvoiceView = ({
     const ratio = Math.min(pdfW / canvas.width, pdfH / canvas.height);
     const w = canvas.width * ratio, h = canvas.height * ratio;
     pdf.addImage(img, "PNG", (pdfW - w) / 2, (pdfH - h) / 2, w, h);
-    const fname = `${isApproved ? "PINV" : "PO"}_${invoiceMeta.invoiceNo || (po.displayTransactionNo || po.transactionNo)}_${copyType.replace(/\s+/g, "_")}.pdf`;
+    const fname = `${isApproved ? "PINV" : "PO"}_${po.displayTransactionNo || po.transactionNo}.pdf`;
     pdf.save(fname);
   };
 
-  const handleBack = () => {
-    setSelectedPO && setSelectedPO(null);
-    setCreatedPO && setCreatedPO(null);
-    setActiveView && setActiveView("list");
-  };
+ const handleBack = () => {
+  setSelectedPO && setSelectedPO(null);
+  setCreatedPO && setCreatedPO(null);
+  setActiveView && setActiveView("list");
+};
 
+// Convert current Purchase Order to Invoice by approving it
+const handleConvertToInvoice = async () => {
+  try {
+    const id = po.id || po._id;
+    if (!id) {
+      addNotification &&
+        addNotification("Unable to convert: missing Purchase Order id.", "error");
+      return;
+    }
+
+    await axiosInstance.patch(`/transactions/transactions/${id}/process`, createApproveBody());
+
+    const updated = { ...po, status: "APPROVED" };
+    setSelectedPO && setSelectedPO(updated);
+    setCreatedPO && setCreatedPO(updated);
+
+     // Update list in PurchaseOrderPage so status is reflected when going back
+    updatePurchaseOrderStatus && updatePurchaseOrderStatus(id, "APPROVED");
+
+    if (addNotification) {
+      addNotification("Purchase Order approved successfully", "success");
+    }
+  } catch (error) {
+    console.error("Convert PO to invoice error:", error);
+    const message =
+      error.response?.data?.message || error.message || "Unknown error";
+    if (addNotification) {
+      addNotification(`Failed to convert to invoice: ${message}`, "error");
+    }
+  }
+};
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-4xl mx-auto px-4">
@@ -151,16 +187,44 @@ const PurchaseInvoiceView = ({
             <ArrowLeft className="w-4 h-4" /> Back to List
           </button>
           <div className="flex gap-3">
-            <button onClick={async () => { setIsGeneratingPDF(true); try { await generatePDF("Internal Copy"); } finally { setIsGeneratingPDF(false); document.getElementById("copy-label").innerText = "Vendor Copy"; } }} disabled={isGeneratingPDF} className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+            <button
+              onClick={async () => {
+                setIsGeneratingPDF(true);
+                try {
+                  await generatePDF();
+                } finally {
+                  setIsGeneratingPDF(false);
+                }
+              }}
+              disabled={isGeneratingPDF}
+              className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            >
               {isGeneratingPDF ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              {isGeneratingPDF ? "Generating…" : "Download (Internal Copy)"}
+              {isGeneratingPDF ? "Generating…" : "Download"}
             </button>
-            <button onClick={async () => { setIsGeneratingPDF(true); try { await generatePDF("Vendor Copy"); } finally { setIsGeneratingPDF(false); document.getElementById("copy-label").innerText = "Vendor Copy"; } }} disabled={isGeneratingPDF} className="flex items-center gap-2 px-5 py-2 bg-slate-600 text-white rounded hover:bg-slate-700 disabled:opacity-50">
-              {isGeneratingPDF ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              {isGeneratingPDF ? "Generating…" : "Copy (Vendor Copy)"}
+            <button
+              onClick={() => {
+                const invoiceEl = document.getElementById("invoice-content");
+                const now = new Date().toLocaleString("en-GB");
+                const w = window.open("", "_blank");
+                const printHTML = `<!doctype html><html><head><meta charset=\"utf-8\"><title>PO</title><style>@page{size:A4;margin:0}html,body{margin:0;padding:0}#invoice-content{width:210mm;height:297mm;padding:10mm;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#fff}table{border-collapse:collapse;width:100%}th,td{padding:6px 8px;border:0 solid #ccc}thead th{border-bottom:2px solid #000;padding:8px}tbody td{border-bottom:1px dotted #ccc}.right{text-align:right}.center{text-align:center}.small{font-size:10px}</style></head><body>${invoiceEl.outerHTML}<script>document.querySelector('.date-time').innerText='${now}';</script></body></html>`;
+                w.document.write(printHTML);
+                w.document.close();
+                setTimeout(() => { w.focus(); w.print(); w.close(); }, 300);
+              }}
+              className="flex items-center gap-2 px-5 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+            >
+              <Printer className="w-4 h-4" /> Print
             </button>
-            <button onClick={() => { const w = window.open("", "_blank"); const invoiceEl = document.getElementById("invoice-content"); const now = new Date().toLocaleString("en-GB"); const printHTML = `<!doctype html><html><head><meta charset=\"utf-8\"><title>PO</title><style>@page{size:A4;margin:0}html,body{margin:0;padding:0}#invoice-content{width:210mm;height:297mm;padding:10mm;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#fff}table{border-collapse:collapse;width:100%}th,td{padding:6px 8px;border:0 solid #ccc}thead th{border-bottom:2px solid #000;padding:8px}tbody td{border-bottom:1px dotted #ccc}.right{text-align:right}.center{text-align:center}.small{font-size:10px}</style></head><body>${invoiceEl.outerHTML}<script>document.querySelector('.date-time').innerText='${now}';</script></body></html>`; w.document.write(printHTML); w.document.close(); setTimeout(()=>{w.focus(); w.print(); w.close();},300); }} className="flex items-center gap-2 px-5 py-2 bg-green-600 text-white rounded hover:bg-green-700"><Printer className="w-4 h-4" /> Print</button>
-            <button onClick={() => alert("Sent")} className="flex items-center gap-2 px-5 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"><Send className="w-4 h-4" /> Send</button>
+            {/* <button onClick={() => alert("Sent")} className="flex items-center gap-2 px-5 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"><Send className="w-4 h-4" /> Send</button> */}
+            {po.status !== "APPROVED" && (
+  <button
+    onClick={handleConvertToInvoice}
+    className="flex items-center gap-2 px-5 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+  >
+    Convert to Purchase Entry
+  </button>
+)}
           </div>
         </div>
 
@@ -178,7 +242,7 @@ const PurchaseInvoiceView = ({
           }}
         >
           <div style={{ textAlign: "right", fontWeight: "bold", marginBottom: 9 }}>
-            <span id="copy-label">Vendor Copy</span>
+            <span id="copy-label">Purchase Order</span>
           </div>
 
           {/* Header block: Arabic, English, contact, title */}
@@ -220,7 +284,7 @@ const PurchaseInvoiceView = ({
               </div>
 
               <div style={{ fontWeight: 700, textDecoration: "underline", marginTop: 6, fontSize: 13 }}>
-                {isApproved ? "PURCHASE ORDER" : "PURCHASE"}
+                {isApproved ? "PURCHASE ENTRY" : "PURCHASE ORDER"}
               </div>
             </div>
 
@@ -235,7 +299,7 @@ const PurchaseInvoiceView = ({
               <div style={{ fontWeight: 700, marginTop: 6 }}>{vendor.vendorName || ""}</div>
               <div style={{ marginTop: 4 }}>{vendor.address || profileData.addressLine1}</div>
               <div style={{ marginTop: 4 }}>TEL: {vendor.phone || profileData.phoneNumber}, Email: {vendor.email || profileData.email}</div>
-              <div style={{ marginTop: 4 }}>VAT Reg. No: {vendor.trnNO || ""}</div>
+              <div style={{ marginTop: 4 }}>VAT Reg. No: {vendorTRN}</div>
             </div>
 
             <div style={{ width: "38%", textAlign: "right", fontSize: 11 }}>
@@ -299,17 +363,8 @@ const PurchaseInvoiceView = ({
 
           <div style={{ minHeight: 40 }} />
 
-          {/* totals block and bank details */}
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-            <div style={{ width: "58%", fontSize: 11 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>BANK DETAILS:-</div>
-              <div style={{ marginTop: 3 }}>BANK : {profileData.bankName}</div>
-              <div>ACCOUNT NO : {profileData.accountNumber}</div>
-              <div>IBAN NO : {profileData.ibanNumber}</div>
-              <div>CURRENCY : AED</div>
-              <div>ACCOUNT NAME : {profileData.accountName}</div>
-            </div>
-
+          {/* totals block (bank details removed for PO printout) */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
             <div style={{ width: "38%", fontSize: 11 }}>
               <div style={{ border: "1px solid #000", padding: 8 }}>
                 {/* <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
@@ -332,17 +387,11 @@ const PurchaseInvoiceView = ({
             </div>
           </div>
 
-          {/* signature area and footer */}
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 18, alignItems: "flex-start" }}>
+          {/* footer (remove Received By section and goods receipt comment for PO) */}
+          <div style={{ display: "flex", justifyContent: "flex-start", marginTop: 18, alignItems: "flex-start" }}>
             <div style={{ width: "58%", fontSize: 10 }}>
               <div>This is computer generated document. Therefore signature is not required.</div>
               <div style={{ marginTop: 6 }}>For {profileData.companyName}</div>
-            </div>
-
-            <div style={{ width: "38%", textAlign: "center" }}>
-              <div style={{ fontSize: 11, marginBottom: 6 }}>Received the above goods in good order and condition.</div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Received by</div>
-              <div style={{ border: "1px solid #000", height: 82, width: "78%", marginLeft: "auto", marginRight: "auto" }} />
             </div>
           </div>
 

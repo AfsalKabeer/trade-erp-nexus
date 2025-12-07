@@ -183,27 +183,31 @@ const SalesOrderManagement = () => {
       });
 
       const transactions = response.data?.data || [];
+      // Exclude APPROVED orders from the main Sales list unless user explicitly selects status=APPROVED
+      const txs = statusFilter === "ALL" ? transactions.filter((t) => t.status !== "APPROVED") : transactions;
       // DEBUG: Log raw backend rows for LPO/DOC/Discount audit
       //console.log("[FETCH SO LIST] rows:", transactions.map(t => ({ id: t._id, lpono: t.lpono ?? t.refNo, docno: t.docno ?? t.docNo, discount: t.discount })));
       console.log("Transaction Fetch from backend "+transactions);
-      // helper to format invoice number for APPROVED orders:
-// remove leading SO (case-insensitive), keep digits, pad to 4 chars (e.g. SO277 -> 0277)
-const formatDisplayTransactionNo = (t) => {
-  try {
-    if (t.status === "APPROVED" && t.transactionNo) {
-      // remove non-digits (and optional SO prefix)
-      const digits = String(t.transactionNo).replace(/^SO/i, "").replace(/\D/g, "");
-      if (!digits) return t.transactionNo;
-      return digits.padStart(4, "0"); // 277 -> 0277
-    }
-    return t.transactionNo;
-  } catch (e) {
-    return t.transactionNo;
-  }
-};
+      // helper to format display number for APPROVED orders:
+      // If SOYYYYMM-NNNNN pattern, show NNNNN; otherwise keep digits padded to 5
+      const formatDisplayTransactionNo = (t) => {
+        try {
+          const tx = t.transactionNo || '';
+          if (t.status === 'APPROVED' && tx) {
+            const m = String(tx).match(/^SO\d{6}-(\d{5})$/i);
+            if (m) return m[1];
+            const digits = String(tx).replace(/\D/g, '');
+            if (!digits) return tx;
+            return digits.slice(-5).padStart(5, '0');
+          }
+          return tx;
+        } catch (e) {
+          return t.transactionNo;
+        }
+      };
 
-      setSalesOrders(
-  transactions.map((t) => {
+        setSalesOrders(
+      txs.map((t) => {
     const displayTransactionNo = formatDisplayTransactionNo(t);
     return {
       id: t._id,
@@ -226,6 +230,8 @@ const formatDisplayTransactionNo = (t) => {
       refNo: t.lpono ?? t.refNo ?? "",
       docNo: t.docno ?? t.docNo ?? "",
       discount: typeof t.discount === "number" ? t.discount : 0,
+      // Add orderNumber as fallback to transactionNo for display purposes
+      orderNumber: t.orderNumber || t.transactionNo,
     };
   })
 );
@@ -274,28 +280,61 @@ const formatDisplayTransactionNo = (t) => {
   );
 
   // EDIT SO – FULLY WORKING
-  const editSO = (so) => {
-    const formItems = so.items.map((it) => {
-      const stock = getStockItemById(it.itemId) || {};
+const editSO = (so) => {
+  const formItems = (so.items || []).map((it) => {
+    const stock = getStockItemById(it.itemId) || {};
 
-      return {
-        _id: it._id || "",
-        itemId: it.itemId,
-        description: it.description,
-        itemName: stock.itemName || it.description,
-        qty: it.qty.toString(),
-        rate: it.rate  ,
-        salesPrice: (stock.salesPrice || 0).toString(),
-        purchasePrice:(stock.purchasePrice || 0).toString(),
-        vatPercent: (it.vatPercent || 5).toString(),
-        vatAmount: (it.vatAmount || 0).toString(),
-        lineTotal: (it.lineTotal || 0).toString(),
-        category: stock.category || "",
-        unitOfMeasure: stock.unitOfMeasure || "",
-        unitOfMeasureDetails: stock.unitOfMeasureDetails || {},
-        stockDetails: it.stockDetails || {},
-      };
-    });
+    // parse numeric helpers
+    const lineQty = parseFloat(it.qty) || 0;
+    const lineRateRaw = parseFloat(it.rate) || 0; // backend 'rate' is line subtotal in your save flow
+    const backendSalesPrice = it.salesPrice != null ? parseFloat(it.salesPrice) : null;
+    const backendPrice = it.price != null ? parseFloat(it.price) : null; // sometimes backend uses `price` as per-unit
+    // Determine per-unit sales price: prefer explicit salesPrice -> price -> rate/qty -> stock salesPrice
+    const perUnitPrice =
+      backendSalesPrice !== null
+        ? backendSalesPrice
+        : backendPrice !== null
+        ? backendPrice
+        : lineQty > 0
+        ? lineRateRaw / lineQty
+        : stock.salesPrice || 0;
+
+    const purchasePrice =
+      it.purchasePrice != null
+        ? parseFloat(it.purchasePrice)
+        : stock.purchasePrice || 0;
+
+    const vatPct = it.vatPercent != null ? parseFloat(it.vatPercent) : (stock.taxPercent || 5);
+    // lineTotal: prefer backend lineTotal/grandTotal -> use computed (perUnitPrice * qty) + VAT
+    const lineSubtotal = lineQty * perUnitPrice;
+    const vatAmount = it.vatAmount != null ? parseFloat(it.vatAmount) : lineSubtotal * (vatPct / 100);
+    const lineTotal = it.lineTotal != null
+      ? parseFloat(it.lineTotal)
+      : it.grandTotal != null
+      ? parseFloat(it.grandTotal)
+      : lineSubtotal + vatAmount;
+
+    return {
+      _id: it._id || "",
+      itemId: it.itemId,
+      description: it.description || stock.itemName || "",
+      itemName: stock.itemName || it.description || "",
+      qty: lineQty ? lineQty.toString() : (it.qty ?? "").toString(),
+      // IMPORTANT: set `rate` and `salesPrice` to per-unit price (string) — form expects per-unit
+      rate: perUnitPrice.toString(),
+      salesPrice: perUnitPrice.toString(),
+      purchasePrice: purchasePrice.toString(),
+      vatPercent: vatPct.toString(),
+      vatAmount: vatAmount.toFixed(2).toString(),
+      lineTotal: parseFloat(lineTotal).toFixed(2).toString(),
+      category: stock.category || "",
+      unitOfMeasure: stock.unitOfMeasure || "",
+      unitOfMeasureDetails: stock.unitOfMeasureDetails || {},
+      stockDetails: it.stockDetails || {},
+      currentStock: typeof stock.currentStock === "number" ? stock.currentStock : 0,
+    };
+  });
+
 
     setFormData({
       transactionNo: so.transactionNo,
@@ -416,10 +455,14 @@ const formatDisplayTransactionNo = (t) => {
   const filteredAndSortedSOs = useMemo(
     () => () => {
       let filtered = salesOrders.filter((so) => {
+        const txNo = String(so.transactionNo || "").toLowerCase();
+        const custName = String(so.customerName || "").toLowerCase();
+        const createdBy = String(so.createdBy || "").toLowerCase();
+        const term = String(searchTerm || "").toLowerCase();
         const matchesSearch =
-          so.transactionNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          so.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          so.createdBy?.toLowerCase().includes(searchTerm.toLowerCase());
+          txNo.includes(term) ||
+          custName.includes(term) ||
+          createdBy.includes(term);
 
         const matchesStatus =
           statusFilter === "ALL" || so.status === statusFilter;
@@ -677,7 +720,19 @@ const formatDisplayTransactionNo = (t) => {
       );
     }
   };
-
+// Update a single SO in local list state (used when approving from invoice view)
+const updateSalesOrderStatus = (id, newStatus) => {
+  setSalesOrders((prev) => {
+    if (newStatus === "APPROVED") {
+      return prev.filter((so) => so.id !== id && so._id !== id);
+    }
+    return prev.map((so) =>
+      so.id === id || so._id === id
+        ? { ...so, status: newStatus, approvedAt: new Date().toISOString() }
+        : so
+    );
+  });
+};
   // Generate invoice PDF for a given SO and copy type from the list views
   const downloadInvoiceCopy = async (so, copyType) => {
     try {
@@ -1303,6 +1358,8 @@ const formatDisplayTransactionNo = (t) => {
                 createdSO={createdSO}
                 setSelectedSO={setSelectedSO}
                 setCreatedSO={setCreatedSO}
+                addNotification={addNotification} // NEW
+                 updateSalesOrderStatus={updateSalesOrderStatus} // NEW
               />
             )}
           </>

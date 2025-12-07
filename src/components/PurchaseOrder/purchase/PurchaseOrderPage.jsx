@@ -166,10 +166,11 @@ const PurchaseOrderManagement = () => {
           dateFilter: dateFilter !== "ALL" ? dateFilter : undefined,
         },
       });
+      // filter out APPROVED orders from the main PurchaseOrder list unless user explicitly filters for APPROVED
+      const rawTxs = data.data || [];
+      const txs = rawTxs.filter((t) => (statusFilter === "ALL" ? t.status !== "APPROVED" : true));
 
-      console.log("Raw transactions:", data); // Debug
-
-      const enrichedPOs = data.data.map((t) => {
+      const enrichedPOs = txs.map((t) => {
         // FIX: Enrich vendor name using vendors array (reliable fallback)
         const vendorObj = vendors.find((v) => v._id === t.partyId);
         const vendorName = vendorObj?.vendorName || t.partyName || "Unknown Vendor";
@@ -234,6 +235,8 @@ const PurchaseOrderManagement = () => {
           creditNoteIssued: t.creditNoteIssued || false,
           quoteRef: t.quoteRef || null,
           linkedRef: t.linkedRef || null,
+          // Add orderNumber as fallback to transactionNo for display purposes
+          orderNumber: t.orderNumber || t.transactionNo,
         };
       });
 
@@ -700,7 +703,7 @@ const PurchaseOrderManagement = () => {
                   ></div>
                   <div>
                     <p className="font-medium text-slate-900">
-                      {po.transactionNo}
+                      {po.orderNumber || po.transactionNo}
                     </p>
                     <p className="text-sm text-slate-600">{po.vendorName}</p>
                   </div>
@@ -1021,7 +1024,20 @@ const PurchaseOrderManagement = () => {
       );
     }
   };
-
+// Update a single PO in local list state (used when approving from invoice view)
+const updatePurchaseOrderStatus = (id, newStatus) => {
+  setPurchaseOrders((prev) => {
+    if (newStatus === "APPROVED") {
+      // remove approved orders from main list (they belong to Approved list)
+      return prev.filter((po) => po.id !== id && po._id !== id);
+    }
+    return prev.map((po) =>
+      po.id === id || po._id === id
+        ? { ...po, status: newStatus, approvedAt: new Date().toISOString() }
+        : po
+    );
+  });
+};
   // Reject PO
   const rejectPO = async (id) => {
     try {
@@ -1307,9 +1323,11 @@ const PurchaseOrderManagement = () => {
                 createdPO={createdPO}
                 setSelectedPO={setSelectedPO}
                 setCreatedPO={setCreatedPO}
+                addNotification={addNotification} 
+                updatePurchaseOrderStatus={updatePurchaseOrderStatus} // NEW
               />
             )}
-          </>
+          </> 
         )}
       </div>
     </div>

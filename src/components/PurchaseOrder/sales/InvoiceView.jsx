@@ -2,13 +2,15 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { ArrowLeft, Download, Loader2, Printer, Send } from "lucide-react";
 import axiosInstance from "../../../axios/axios";
+import { createApproveBody } from '../../../utils/orderUtils';
 import { formatNumber, formatDateGB, decimalSum } from "../../../utils/format";
 
-const pad4 = (v = "") => {
-  const n = String(v || "").replace(/\D/g, "");
-  return n ? n.padStart(4, "0") : "".padStart(4, "0");
-};
 
+const pad4 = (v = "") => {
+    const n = String(v || "").replace(/\D/g, "");
+    return n ? n.padStart(4, "0") : "".padStart(4, "0");
+  };
+ 
 const SaleInvoiceView = ({
   selectedSO,
   createdSO,
@@ -16,6 +18,8 @@ const SaleInvoiceView = ({
   setActiveView,
   setSelectedSO,
   setCreatedSO,
+  addNotification,
+   updateSalesOrderStatus,    // NEW
 }) => {
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [profileData, setProfileData] = useState({
@@ -26,7 +30,7 @@ const SaleInvoiceView = ({
     phoneNumber: "04 885 7575",
     email: "corporate@elfab.ae",
     website: "www.nhfoodsglobal.com",
-    vatNumber: "1000033168300003",
+    vatNumber: "105033168300003",
     logo: null,
     bankName: "NATIONAL BANK OF RAS AL KHAIMAH",
     accountNumber: "0333547283001",
@@ -81,24 +85,48 @@ const SaleInvoiceView = ({
   const customer = customers.find((c) => c._id === so.customerId) || {};
   const isApproved = so.status === "APPROVED";
 
+  const deriveInvoiceNo = (soObj) => {
+    try {
+      if (!isApproved) return '';
+      const orderNo = soObj.orderNumber || soObj.transactionNo || '';
+      console.log(soObj);
+      // Auto pattern SOYYYYMM-NNNNN -> extract NNNNN
+      const m = String(orderNo).match(/^SO\d{6}-(\d{5})$/i);
+      if (m) return m[1];
+      // If backend sent invoiceNumber/transactionNumber explicitly, use its last 5 digits if present
+      const invRaw = soObj.invoiceNumber || soObj.transactionNumber || '';
+      if (invRaw) {
+        const digits = String(invRaw).replace(/\D/g, '');
+        if (digits.length >= 5) return digits.slice(-5);
+        if (digits) return digits.padStart(5, '0');
+      }
+      // Manual mode or unknown format: use order number as-is
+      return orderNo || '';
+    } catch {
+      return '';
+    }
+  };
+
   // invoice meta: not editable in UI (display-only)
   const [invoiceMeta, setInvoiceMeta] = useState({
-    invoiceNo: pad4(so.invoiceNumber || so.displayTransactionNo || ""),
-    soNo: isApproved ? (so.displayTransactionNo || so.transactionNo) : so.transactionNo,
-    lpoOrRef: so.refNo ?? so.lpono ?? "",
-    docNo: so.docNo ?? so.docno ?? "",
-    paymentTerms: customer.paymentTerms || "COD",
+    invoiceNo: deriveInvoiceNo(so),
+    soNo: so.orderNumber || so.transactionNo || '',
+    lpoOrRef: (so.refNo ?? so.lpono ?? '-') || '-',
+    docNo: (so.docNo ?? so.docno ?? '-') || '-',
+    paymentTerms: customer.paymentTerms || 'COD',
   });
 
   useEffect(() => {
     setInvoiceMeta((m) => ({
       ...m,
-      invoiceNo: pad4(so.invoiceNumber || so.displayTransactionNo || m.invoiceNo),
-      soNo: isApproved ? (so.displayTransactionNo || so.transactionNo) : so.transactionNo,
-      lpoOrRef: (so.refNo ?? so.lpono ?? m.lpoOrRef ?? ""),
-      docNo: (so.docNo ?? so.docno ?? m.docNo ?? ""),
-      paymentTerms: customer.paymentTerms || m.paymentTerms || "COD",
+      invoiceNo: deriveInvoiceNo(so) || m.invoiceNo,
+      soNo: so.orderNumber || so.transactionNo || m.soNo || '',
+      lpoOrRef: (so.refNo ?? so.lpono ?? m.lpoOrRef ?? '-') || '-',
+      docNo: (so.docNo ?? so.docno ?? m.docNo ?? '-') || '-',
+      paymentTerms: customer.paymentTerms || m.paymentTerms || 'COD',
     }));
+    console.log("Invoice Meta Updated:", invoiceMeta);
+    console.log(so);  
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [so, customer, isApproved]);
 
@@ -124,7 +152,9 @@ const SaleInvoiceView = ({
   const generatePDF = async (copyType) => {
     const html2canvas = (await import("html2canvas")).default;
     const { jsPDF } = await import("jspdf");
-    document.getElementById("copy-label").innerText = copyType;
+    if (document.getElementById("copy-label")) {
+      document.getElementById("copy-label").innerText = copyType;
+    }
     await new Promise((r) => setTimeout(r, 80));
     const el = document.getElementById("invoice-content");
     const canvas = await html2canvas(el, { scale: 3, useCORS: true, backgroundColor: "#fff" });
@@ -134,20 +164,31 @@ const SaleInvoiceView = ({
     const ratio = Math.min(pdfW / canvas.width, pdfH / canvas.height);
     const w = canvas.width * ratio, h = canvas.height * ratio;
     pdf.addImage(img, "PNG", (pdfW - w) / 2, (pdfH - h) / 2, w, h);
-    const fname = `${isApproved ? "INV" : "SO"}_${invoiceMeta.invoiceNo || (so.displayTransactionNo || so.transactionNo)}_${copyType.replace(/\s+/g, "_")}.pdf`;
+    const customerName = customer.customerName ? customer.customerName.replace(/\s+/g, "_") : "Customer";
+    const docNumber = isApproved ? invoiceMeta.invoiceNo : invoiceMeta.soNo;
+    const filenameSuffix = copyType ? `_${copyType.replace(/\s+/g, "_")}` : "";
+    const fname = `${isApproved ? "INV" : "SO"}_${docNumber}_${customerName}${filenameSuffix}.pdf`;
     pdf.save(fname);
   };
 
   const handleDownloadPDF = async () => {
     setIsGeneratingPDF(true);
     try {
-      await generatePDF("Internal Copy");
-      await generatePDF("Customer Copy");
+      if (isApproved) {
+        // For invoice: generate both Internal Copy and Customer Copy
+        await generatePDF("Internal Copy");
+        await generatePDF("Customer Copy");
+      } else {
+        // For sales order: generate only single document
+        await generatePDF("");
+      }
     } catch (e) {
       alert("PDF generation failed");
     } finally {
       setIsGeneratingPDF(false);
-      document.getElementById("copy-label").innerText = "Customer Copy";
+      if (isApproved) {
+        document.getElementById("copy-label").innerText = "Customer Copy";
+      }
     }
   };
 
@@ -175,7 +216,38 @@ const SaleInvoiceView = ({
     setCreatedSO(null);
     setActiveView("list");
   };
+// Convert current Sales Order to Invoice by approving it
+// Convert current Sales Order to Invoice by approving it
+const handleConvertToInvoice = async () => {
+  try {
+    const id = so.id || so._id;
+    if (!id) {
+      addNotification &&
+        addNotification("Unable to convert: missing Sales Order id.", "error");
+      return;
+    }
 
+    await axiosInstance.patch(`/transactions/transactions/${id}/process`, createApproveBody());
+
+    const updated = { ...so, status: "APPROVED" };
+    setSelectedSO && setSelectedSO(updated);
+    setCreatedSO && setCreatedSO(updated);
+
+     // Update list in SalesOrderPage so status is reflected when going back
+    updateSalesOrderStatus && updateSalesOrderStatus(id, "APPROVED");
+
+    if (addNotification) {
+      addNotification("Sales Order approved successfully", "success");
+    }
+  } catch (error) {
+    console.error("Convert SO to invoice error:", error);
+    const message =
+      error.response?.data?.message || error.message || "Unknown error";
+    if (addNotification) {
+      addNotification(`Failed to convert to invoice: ${message}`, "error");
+    }
+  }
+};
   // layout JSX
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -191,6 +263,14 @@ const SaleInvoiceView = ({
             </button>
             <button onClick={handlePrint} className="flex items-center gap-2 px-5 py-2 bg-green-600 text-white rounded hover:bg-green-700"><Printer className="w-4 h-4" /> Print</button>
             <button onClick={() => alert("Sent")} className="flex items-center gap-2 px-5 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"><Send className="w-4 h-4" /> Send</button>
+            {so.status !== "APPROVED" && (
+  <button
+    onClick={handleConvertToInvoice}
+    className="flex items-center gap-2 px-5 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+  >
+    Convert to Invoice
+  </button>
+)}
           </div>
         </div>
 
@@ -208,7 +288,7 @@ const SaleInvoiceView = ({
           }}
         >
           <div style={{ textAlign: "right", fontWeight: "bold", marginBottom: 9 }}>
-            <span id="copy-label">Customer Copy</span>
+            {isApproved && <span id="copy-label">Customer Copy</span>}
           </div>
 
           {/* header: left logo, center names, right blank (meta moved lower) */}
@@ -274,7 +354,7 @@ const SaleInvoiceView = ({
               <div style={{ marginTop: 6 }}>{customer.customerId || ""}</div>
               <div style={{ fontWeight: 700, marginTop: 6 }}>{customer.customerName || ""}</div>
               <div style={{ marginTop: 4 }}>{customer.billingAddress || profileData.addressLine1}</div>
-              <div style={{ marginTop: 4 }}>TEL: {customer.phone || profileData.phoneNumber}, Email: {customer.email || profileData.email}</div>
+              <div style={{ marginTop: 4 }}>Email: {customer.email || profileData.email}</div>
               <div style={{ marginTop: 4 }}>VAT Reg. No: {customer.trnNumber || ""}</div>
             </div>
 
@@ -282,7 +362,7 @@ const SaleInvoiceView = ({
             <div style={{ width: "38%", textAlign: "right", fontSize: 11 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div style={{ textAlign: "left", minWidth: 100 }}>
-                  <div style={{ fontWeight: 700 }}>Invoice:</div>
+                  {isApproved && <div style={{ fontWeight: 700 }}>Invoice:</div>}
                   <div style={{ fontWeight: 700, marginTop: 6 }}>Date:</div>
                   <div style={{ fontWeight: 700, marginTop: 6 }}>SO No</div>
                   <div style={{ fontWeight: 700, marginTop: 6 }}>LPO</div>
@@ -290,7 +370,9 @@ const SaleInvoiceView = ({
                   <div style={{ fontWeight: 700, marginTop: 6 }}>Payment Terms</div>
                 </div>
                 <div style={{ textAlign: "right", minWidth: 110 }}>
-                  <div style={{ marginBottom: 2, fontWeight: 700 }}>{invoiceMeta.invoiceNo}</div>
+                  {isApproved && (
+                    <div style={{ marginBottom: 2, fontWeight: 700 }}>{invoiceMeta.invoiceNo}</div>
+                  )}
                   <div style={{ marginTop: 6 }}>{formatDateGB(so.date)}</div>
                   <div style={{ marginTop: 6 }}>{invoiceMeta.soNo}</div>
                   <div style={{ marginTop: 6 }}>{invoiceMeta.lpoOrRef}</div>
@@ -346,18 +428,20 @@ const SaleInvoiceView = ({
           {/* spacer to mimic sample (leaves blank area for long blank space) */}
           <div style={{ minHeight: 40 }} />
 
-          {/* totals block and bank details */}
+          {/* totals block and bank details (hide bank details for Sales Order) */}
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
-            <div style={{ width: "58%", fontSize: 11 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>BANK DETAILS:-</div>
-              <div style={{ marginTop: 3 }}>BANK : {profileData.bankName}</div>
-              <div>ACCOUNT NO : {profileData.accountNumber}</div>
-              <div>IBAN NO : {profileData.ibanNumber}</div>
-              <div>CURRENCY : AED</div>
-              <div>ACCOUNT NAME : {profileData.accountName}</div>
-            </div>
+            {isApproved && (
+              <div style={{ width: "58%", fontSize: 11 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>BANK DETAILS:-</div>
+                <div style={{ marginTop: 3 }}>BANK : {profileData.bankName}</div>
+                <div>ACCOUNT NO : {profileData.accountNumber}</div>
+                <div>IBAN NO : {profileData.ibanNumber}</div>
+                <div>CURRENCY : AED</div>
+                <div>ACCOUNT NAME : {profileData.accountName}</div>
+              </div>
+            )}
 
-            <div style={{ width: "38%", fontSize: 11 }}>
+            <div style={{ width: isApproved ? "38%" : "100%", fontSize: 11 }}>
               <div style={{ border: "1px solid #000", padding: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                   <div>DISCOUNT (IF ANY)</div>
@@ -379,19 +463,28 @@ const SaleInvoiceView = ({
             </div>
           </div>
 
-          {/* signature area and footer */}
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 18, alignItems: "flex-start" }}>
-            <div style={{ width: "58%", fontSize: 10 }}>
-              <div>This is computer generated document. Therefore signature is not required.</div>
-              <div style={{ marginTop: 6 }}>For {profileData.companyName}</div>
-            </div>
+          {/* signature area and footer (hide Received By for Sales Order) */}
+          {isApproved ? (
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 18, alignItems: "flex-start" }}>
+              <div style={{ width: "58%", fontSize: 10 }}>
+                <div>This is computer generated document. Therefore signature is not required.</div>
+                <div style={{ marginTop: 6 }}>For {profileData.companyName}</div>
+              </div>
 
-            <div style={{ width: "38%", textAlign: "center" }}>
-              <div style={{ fontSize: 11, marginBottom: 6 }}>Received the above goods in good order and condition.</div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Received by</div>
-              <div style={{ border: "1px solid #000", height: 82, width: "78%", marginLeft: "auto", marginRight: "auto" }} />
+              <div style={{ width: "38%", textAlign: "center" }}>
+                <div style={{ fontSize: 11, marginBottom: 6 }}>Received the above goods in good order and condition.</div>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Received by</div>
+                <div style={{ border: "1px solid #000", height: 82, width: "78%", marginLeft: "auto", marginRight: "auto" }} />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div style={{ display: "flex", justifyContent: "flex-start", marginTop: 18, alignItems: "flex-start" }}>
+              <div style={{ width: "58%", fontSize: 10 }}>
+                <div>This is computer generated document. Therefore signature is not required.</div>
+                <div style={{ marginTop: 6 }}>For {profileData.companyName}</div>
+              </div>
+            </div>
+          )}
 
           {/* page number centered */}
           <div style={{ textAlign: "center", marginTop: 18, fontSize: 10 }}>Page 1 of 1</div>
